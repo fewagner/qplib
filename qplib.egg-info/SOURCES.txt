@@ -1,9 +1,0 @@
-README.txt
-setup.py
-qplib/__init__.py
-qplib/cpsim.py
-qplib.egg-info/PKG-INFO
-qplib.egg-info/SOURCES.txt
-qplib.egg-info/dependency_links.txt
-qplib.egg-info/top_level.txt
-tests/__init__.py
