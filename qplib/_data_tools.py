@@ -7,11 +7,16 @@ import os
 from ._ts_tools import get_jumps, fit_psd_lonly
 from ._plots import plot_psd_lonly
 
-def get_asg_states_h5(fpath, channel=0):
+def get_exp_data_h5(fpath, channel=0):
     with h5py.File(fpath, "r") as f:
         data = f['Experimental Data/Data']
         asg_states = np.array(data[:, 1 + channel * 2])
     return asg_states.round() * 2 - 1
+
+def get_pulse_period(fpath):
+    with h5py.File(fpath, "r") as f:
+        pulse_period = float(f['Instrument settings/TriggerDevice'].attrs['pulse_period'][:])
+    return pulse_period
 
 def process_data(data, **kwargs):
     if not "asg_states" in kwargs:

@@ -30,13 +30,13 @@ def fit_waiting_times(tunnel, **kwargs):
     def wt_ffunc(t, A1, tau1, A2, tau2):
         return A1 * np.exp(-t / tau1) + A2 * np.exp(-t / tau2)
 
-    wt_popt, wt_pcov = curve_fit(lambda x, a, b, c, d: np.log10(wt_ffunc(x, a, b, c, d)),
+    res = curve_fit(lambda x, a, b, c, d: np.log10(wt_ffunc(x, a, b, c, d)),
                                  bin_centers[idx_nzero],
                                  np.log10(hist[idx_nzero] / bw[idx_nzero]),
                                  p0=[2e8, 0.015, 1e5, .6],
                                  bounds=([1, 1e-3, 1, 1e-3], [1e10, 1e3, 1e10, 1e3]))
 
-    return bin_centers, hist, bw, wt_popt, wt_pcov
+    return bin_centers, hist, bw, res[0], res[1]
 
 
 def psd_ffunc(freq, C, gamma_rts_1, gamma_rts_2, A, B, alpha):
@@ -75,25 +75,25 @@ def fit_psd(jumps, p0=[2e-6, 1e2, 1e5, 0.3, 0.4, 0.25],
         Pxx_den = savgol_filter(Pxx_den, filter_window, filter_poly)
 
     if not use_original:
-        psd_popt, psd_pcov = curve_fit(
+        res = curve_fit(
             lambda x, a, b, c, d, e, f: np.log10(psd_ffunc(freq=x, C=a, gamma_rts_1=b, gamma_rts_2=c,
                                                            A=d, B=e, alpha=f)),
             f[1:],
             np.log10(Pxx_den[1:]),
             p0=p0,
             bounds=([0., 0., 0., 0., 0., 0.], [1., 1e6, 1e6, 1., 1., 1.]))
-        loss = np.sum((psd_ffunc(f[1:], *psd_popt) - Pxx_den[1:]) ** 2)
+        loss = np.sum((psd_ffunc(f[1:], *res[0]) - Pxx_den[1:]) ** 2)
     else:
-        psd_popt, psd_pcov = curve_fit(
+        res = curve_fit(
             lambda x, b, c, d, e: np.log10(psd_ffunc_original(freq=x, t_exp=kwargs["time_base"], gamma_rts_1=b, gamma_rts_2=c,
                                                            fidelity=d, coverage=e)),
             f[1:],
             np.log10(Pxx_den[1:]),
             p0=p0[1:-1],
             bounds=([0., 0., 0., 0.], [1e6, 1e6, 1., 1.]))
-        loss = np.sum((psd_ffunc_original(f[1:], kwargs["time_base"], *psd_popt) - Pxx_den[1:]) ** 2)
+        loss = np.sum((psd_ffunc_original(f[1:], kwargs["time_base"], *res[0]) - Pxx_den[1:]) ** 2)
 
-    return f, Pxx_den, psd_popt, loss
+    return f, Pxx_den, res[0], loss
 
 
 def fit_psd_lonly(jumps, p0=[0.6, 0.5, 0.1, 1e2, 1e4, 5e5],
@@ -106,15 +106,15 @@ def fit_psd_lonly(jumps, p0=[0.6, 0.5, 0.1, 1e2, 1e4, 5e5],
     if filter_window is not None:
         Pxx_den = savgol_filter(Pxx_den, filter_window, filter_poly)
 
-    psd_popt, psd_pcov = curve_fit(
+    res = curve_fit(
         lambda x, a, b, c, d, e, f: np.log10(psd_ffunc_lonly(freq=x, A=a, B=b, C=c, co_0=d, co_1=e, co_2=f)),
         f[1:],
         np.log10(Pxx_den[1:]),
         p0=p0,
         bounds=([0., 0., 0., 1., 1., 1.], [1., 1., 1., 1e6, 1e6, 1e6]))
-    loss = np.sum((psd_ffunc_lonly(f[1:], *psd_popt) - Pxx_den[1:]) ** 2)
+    loss = np.sum((psd_ffunc_lonly(f[1:], *res[0]) - Pxx_den[1:]) ** 2)
 
-    return f, Pxx_den, psd_popt, loss
+    return f, Pxx_den, res[0], loss
 
 
 def trigger(tunnel, expected_waiting=2.5e-5, **kwargs):
