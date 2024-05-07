@@ -12,6 +12,7 @@ from tqdm.auto import trange
 
 import pdb
 
+
 class QPTDataProcessor:
 
     def __init__(self, folders_in, folder_out, n=500000, identifier='QPT'):
@@ -33,6 +34,9 @@ class QPTDataProcessor:
         self.f = np.fft.rfftfreq(self.n, self.time_base)
         self.psd = None
         self.popt = None
+        self.bootstrap_files = None
+        self.bootstrap_channels = None
+        self.bootstrap_pperiods = None
 
     def get_qb_names(self, folder):
         all_qbs = []
@@ -70,6 +74,9 @@ class QPTDataProcessor:
             'lengths must match: starts, stops, exclude, folders'
         self.counter = 0.
         self.psd = np.zeros(self.f.shape[0])
+        self.bootstrap_files = []
+        self.bootstrap_channels = []
+        self.bootstrap_pperiods = []
         # i ... idx of folder, j ... idx of file, k ... idx of qubit
         for i in trange(len(self.files)):
             for j in trange(len(self.files[i])):
@@ -78,9 +85,13 @@ class QPTDataProcessor:
                         if self.qbs[i][j][k] == self.names[i]:
                             try:
                                 asg_states = get_exp_data_h5(self.files[i][j], channel=k)
+                                self.bootstrap_files.append(self.files[i][j])
+                                self.bootstrap_channels.append(k)
+
                                 jumps = get_jumps(asg_states)
 
                                 f, Pxx_den = periodogram(jumps, 1 / self.pulse_periods[i][j], scaling="density")
+                                self.bootstrap_pperiods.append(self.pulse_periods[i][j])
 
                                 # interpolate arrays to identical f grid
                                 psd = np.interp(self.f, f, Pxx_den)
@@ -109,6 +120,12 @@ class QPTDataProcessor:
             self.filtered_psd = savgol_filter(self.psd, filter_window, filter_poly)
         else:
             self.filtered_psd = self.psd
+
+        self.p0 = p0
+        self.lb = lb
+        self.ub = ub
+        self.filter_window = filter_window
+        self.filter_poly = filter_poly
 
         if methode == 'mse':
             self.res = curve_fit(
@@ -148,9 +165,9 @@ class QPTDataProcessor:
         assert self.popt is not None, "should fit_psd first!"
 
         out = plot_psd_lonly(self.f,
-                       self.filtered_psd if filtered else self.psd,
-                       self.popt, show=show, ylim=ylim,
-                       time_base=self.time_base, freqs=self.popt[3:])
+                             self.filtered_psd if filtered else self.psd,
+                             self.popt, show=show, ylim=ylim,
+                             time_base=self.time_base, freqs=self.popt[3:])
         return out
 
     def print_results(self):
@@ -159,3 +176,69 @@ class QPTDataProcessor:
 
     def save(self):
         pass  # TODO
+
+    # -------------------------------------------------
+    # BOOTSTRAPPING
+    # -------------------------------------------------
+
+    @staticmethod
+    def _fit_one_psd(f, psd,
+                     p0=[0.05, 0.05, 0.05, 1e2, 1e4, 1e6],
+                     filter_window=None,
+                     filter_poly=1,
+                     lb=[0., 0., 0., 1., 1., 1.],
+                     ub=[1., 1., 1., 1e7, 1e7, 1e7],
+                     ):
+
+        if filter_window is not None:
+            filtered_psd = savgol_filter(psd, filter_window, filter_poly)
+        else:
+            filtered_psd = psd
+
+        res = curve_fit(
+            lambda x, a, b, c, d, e, f: np.log10(psd_ffunc_lonly(freq=x, A=a, B=b, C=c, co_0=d, co_1=e, co_2=f)),
+            f[1:],
+            np.log10(filtered_psd[1:]),
+            p0=p0,
+            bounds=(lb, ub),
+        )
+        return res[0]
+
+    def bootstrap(self,
+                  chunksize=10,
+                  use_popt=True,
+                  ):
+        assert self.bootstrap_files is not None, 'Calc PSD first!'
+
+        self.popt_bootstrap = []
+
+        for i in range(0, len(self.bootstrap_files), chunksize):
+
+            psd = np.zeros(self.f.shape)
+            counter = 0
+
+            for path, ch, pper in zip(self.bootstrap_files[i:i + chunksize],
+                                      self.bootstrap_channels[i:i + chunksize],
+                                      self.bootstrap_pperiods[i:i + chunksize]):
+                asg_states = get_exp_data_h5(path, channel=ch)
+                jumps = get_jumps(asg_states)
+
+                f, Pxx_den = periodogram(jumps, 1 / pper, scaling="density")
+
+                # interpolate arrays to identical f grid
+                psd_ = np.interp(self.f, f, Pxx_den)
+
+                # sum up the arrays
+                psd += psd_
+                counter += 1
+
+            psd /= counter
+
+            popt = self._fit_one_psd(self.f, psd,
+                                    p0=self.popt if use_popt else self.p0,
+                                    filter_window=self.filter_window,
+                                    filter_poly=self.filter_poly,
+                                    lb=self.lb,
+                                    ub=self.ub,
+                                    )
+            self.popt_bootstrap.append(popt)
