@@ -10,6 +10,7 @@ from scipy.optimize import curve_fit, minimize
 import numpy as np
 from tqdm.auto import trange
 
+import pdb
 
 class QPTDataProcessor:
 
@@ -22,7 +23,8 @@ class QPTDataProcessor:
         self.files = [sorted(fo) for fo in self.files]
         self.time_stamps = [[s.split('/')[-1][:6] for s in fo] for fo in self.files]
         self.qbs = [self.get_qb_names(fo) for fo in self.files]
-        self.qb_names = [np.unique(fo) for fo in (self.qbs)]
+        self.qb_names = [list({x for l in self.qbs[i] for x in l}) for i in
+                         range(len(self.qbs))]
         self.n = n
 
         self.pulse_periods = [[get_pulse_period(f) for f in fo] for fo in self.files]
@@ -55,6 +57,7 @@ class QPTDataProcessor:
                  starts='000000',
                  stops='235959',
                  exclude=None):
+
         if type(starts) == str:
             starts = [starts for _ in self.files]
         if type(stops) == str:
@@ -65,7 +68,7 @@ class QPTDataProcessor:
         assert type(exclude) == list, 'exclude must be list or None'
         assert len(starts) == len(stops) == len(exclude) == len(self.files), \
             'lengths must match: starts, stops, exclude, folders'
-        counter = 0.
+        self.counter = 0.
         self.psd = np.zeros(self.f.shape[0])
         # i ... idx of folder, j ... idx of file, k ... idx of qubit
         for i in trange(len(self.files)):
@@ -73,19 +76,23 @@ class QPTDataProcessor:
                 if starts[i] <= self.time_stamps[i][j] <= stops[i] and self.time_stamps[i][j] not in exclude[i]:
                     for k in range(len(self.qbs[i][j])):
                         if self.qbs[i][j][k] == self.names[i]:
-                            asg_states = get_exp_data_h5(self.files[i][j], channel=k)
-                            jumps = get_jumps(asg_states)
+                            try:
+                                asg_states = get_exp_data_h5(self.files[i][j], channel=k)
+                                jumps = get_jumps(asg_states)
 
-                            f, Pxx_den = periodogram(jumps, 1 / self.pulse_periods[i][j], scaling="density")
+                                f, Pxx_den = periodogram(jumps, 1 / self.pulse_periods[i][j], scaling="density")
 
-                            # interpolate arrays to identical f grid
-                            psd = np.interp(self.f, f, Pxx_den)
+                                # interpolate arrays to identical f grid
+                                psd = np.interp(self.f, f, Pxx_den)
 
-                            # sum up the arrays
-                            self.psd += psd
-                            counter += 1
+                                # sum up the arrays
+                                self.psd += psd
+                                self.counter += 1
+                            except Exception as error:
+                                print('File {} not processed due to {'
+                                      '}'.format(self.files[i][j], error))
 
-        self.psd /= counter
+        self.psd /= self.counter
 
     def fit_psd(self,
                 p0=[0.05, 0.05, 0.05, 1e2, 1e4, 1e6],
@@ -123,7 +130,7 @@ class QPTDataProcessor:
                 return output
 
             meth = 'Nelder-Mead'
-            opts = {'maxfev': 5000}  # , 'xtol': 1e-16, 'ftol': 1e-16
+            opts = {'maxfev': 3000}  # , 'xtol': 1e-16, 'ftol': 1e-16
 
             self.res = minimize(neglnlike,
                                 np.array(p0),
