@@ -18,6 +18,18 @@ def get_pulse_period(fpath):
         pulse_period = float(f['Instrument settings/TriggerDevice'].attrs['pulse_period'][:])
     return pulse_period
 
+def get_ge_freq(fpath, qubit):
+    with h5py.File(fpath, "r") as f:
+        ge_freq = float(f['Instrument settings/' + qubit].attrs[
+                      'ge_freq'][:])
+    return ge_freq
+
+def get_ro_freq(fpath, qubit):
+    with h5py.File(fpath, "r") as f:
+        ro_freq = float(f['Instrument settings/' + qubit].attrs[
+                      'ro_freq'][:])
+    return ro_freq
+
 def process_data(data, **kwargs):
     if not "asg_states" in kwargs:
         if kwargs["prim_key"] is None:

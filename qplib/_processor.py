@@ -2,9 +2,10 @@ import os
 
 import matplotlib.pyplot as plt
 
-from ._data_tools import get_exp_data_h5, get_pulse_period
+from ._data_tools import get_exp_data_h5, get_pulse_period, get_ge_freq, \
+    get_ro_freq
 from ._ts_tools import get_jumps, psd_ffunc_lonly
-from ._plots import plot_psd_lonly
+from ._plots import plot_psd_lonly, plot_spectrogram
 from scipy.signal import periodogram, savgol_filter
 from scipy.optimize import curve_fit, minimize
 import numpy as np
@@ -33,14 +34,13 @@ class QPTDataProcessor:
 
         self.pulse_periods = [[get_pulse_period(f) for f in fo] for fo in
                               self.files]
-        self.time_base = np.max([np.max(p) for p in self.pulse_periods])
 
-        self.f = np.fft.rfftfreq(self.n, self.time_base)
         self.psd = None
         self.popt = None
         self.bootstrap_files = None
         self.bootstrap_channels = None
         self.bootstrap_pperiods = None
+        self.asg_states = []
 
     def get_qb_names(self, folder):
         all_qbs = []
@@ -63,6 +63,24 @@ class QPTDataProcessor:
         asg_states = get_exp_data_h5(self.files[foidx][fidx], channel=qidx)
         return asg_states
 
+    def get_ge_freqs(self):
+        ge_freqs = []
+        for paths, qubit in zip(self.files, self.names):
+            for p in paths:
+                if qubit in p:
+                    ge_freqs.append(get_ge_freq(p, qubit))
+                    break
+        return ge_freqs
+
+    def get_ro_freqs(self):
+        ro_freqs = []
+        for paths, qubit in zip(self.files, self.names):
+            for p in paths:
+                if qubit in p:
+                    ro_freqs.append(get_ro_freq(p, qubit))
+                    break
+        return ro_freqs
+
     def calc_psd(self,
                  starts='000000',
                  stops='235959',
@@ -79,11 +97,31 @@ class QPTDataProcessor:
         assert type(exclude) == list, 'exclude must be list or None'
         assert len(starts) == len(stops) == len(exclude) == len(self.files), \
             'lengths must match: starts, stops, exclude, folders'
+
+        self.time_base = 0.
+
+        self.actual_pulse_periods = []
+
+        # this is only to get time base right!
+        # i ... idx of folder, j ... idx of file, k ... idx of qubit
+        for i in range(len(self.files)):
+            for j in range(len(self.files[i])):
+                if starts[i] <= self.time_stamps[i][j] <= stops[i] and \
+                        self.time_stamps[i][j] not in exclude[i]:
+                    for k in range(len(self.qbs[i][j])):
+                        if self.qbs[i][j][k] == self.names[i]:
+                            self.time_base = np.maximum(self.time_base,
+                                self.pulse_periods[i][j])
+                            self.actual_pulse_periods.append(self.pulse_periods[i][j])
+
+        self.f = np.fft.rfftfreq(self.n, self.time_base)
         self.counter = 0.
         self.psd = np.zeros(self.f.shape[0])
         self.bootstrap_files = []
         self.bootstrap_channels = []
         self.bootstrap_pperiods = []
+
+        # here is the actual PSD calculation
         # i ... idx of folder, j ... idx of file, k ... idx of qubit
         for i in trange(len(self.files)):
             for j in trange(len(self.files[i])):
@@ -96,8 +134,10 @@ class QPTDataProcessor:
                                                              channel=k)
                                 self.bootstrap_files.append(self.files[i][j])
                                 self.bootstrap_channels.append(k)
+                                self.asg_states.append(asg_states)
 
                                 jumps = get_jumps(asg_states)
+
 
                                 f, Pxx_den = periodogram(jumps, 1 /
                                                          self.pulse_periods[i][
@@ -122,7 +162,7 @@ class QPTDataProcessor:
                 p0=[0.05, 0.05, 0.05, 1e2, 1e4, 1e6],
                 filter_window=None,
                 filter_poly=1,
-                methode='ml',
+                methode='mse',
                 lb=[0., 0., 0., 1., 1., 1.],
                 ub=[1., 1., 1., 1e7, 1e7, 1e7],
                 ):
@@ -198,6 +238,22 @@ class QPTDataProcessor:
         pass  # TODO
 
     # -------------------------------------------------
+    # INSPECT SINGLE MEASUREMENTS
+    # -------------------------------------------------
+
+    def plot_spectrogram(self, idx, nperseg=5000, vals=None,
+                         xlim=None, log=False, use_jumps=True):
+        assert self.bootstrap_files is not None, 'Calc PSD first!'
+        asg_states = get_exp_data_h5(self.bootstrap_files[idx],
+                                     channel=self.bootstrap_channels[idx])
+        jumps = get_jumps(asg_states=asg_states)
+        plot_spectrogram(jumps if use_jumps else asg_states,
+                         nperseg=nperseg,
+                         vals=vals,
+                         time_base=self.bootstrap_pperiods[idx],
+                         xlim=xlim, log=log)
+
+    # -------------------------------------------------
     # BOOTSTRAPPING
     # -------------------------------------------------
 
@@ -218,10 +274,11 @@ class QPTDataProcessor:
             filtered_psd = psd
 
         res = curve_fit(
-            lambda x, a, b, c, d, e, f: np.log10(
-                psd_ffunc_lonly(freq=x, A=a, B=b, C=c, co_0=d, co_1=e, co_2=f)),
+            lambda x, a, b, c, d, e, g: np.log10(
+                psd_ffunc_lonly(freq=x, A=a, B=b, C=c, co_0=d, co_1=e, co_2=g)),
             f[1:],
-            np.log10(filtered_psd[1:]),
+            # np.log10(filtered_psd[1:]),
+            np.log10(psd[1:]),
             p0=p0,
             bounds=(lb, ub),
         )
@@ -234,6 +291,7 @@ class QPTDataProcessor:
         assert self.bootstrap_files is not None, 'Calc PSD first!'
 
         self.popt_bootstrap = []
+        self.psd_bootstrap = []
 
         for i in trange(0, len(self.bootstrap_files), chunksize):
 
@@ -243,17 +301,21 @@ class QPTDataProcessor:
             for path, ch, pper in zip(self.bootstrap_files[i:i + chunksize],
                                       self.bootstrap_channels[i:i + chunksize],
                                       self.bootstrap_pperiods[i:i + chunksize]):
-                asg_states = get_exp_data_h5(path, channel=ch)
-                jumps = get_jumps(asg_states)
+                try:
+                    asg_states = get_exp_data_h5(path, channel=ch)
+                    jumps = get_jumps(asg_states)
 
-                f, Pxx_den = periodogram(jumps, 1 / pper, scaling="density")
+                    f, Pxx_den = periodogram(jumps, 1 / pper, scaling="density")
 
-                # interpolate arrays to identical f grid
-                psd_ = np.interp(self.f, f, Pxx_den)
+                    # interpolate arrays to identical f grid
+                    psd_ = np.interp(self.f, f, Pxx_den)
 
-                # sum up the arrays
-                psd += psd_
-                counter += 1
+                    # sum up the arrays
+                    psd += psd_
+                    counter += 1
+                except Exception as error:
+                    print('File {} not processed due to {'
+                          '}'.format(path, error))
 
             psd /= counter
 
@@ -267,6 +329,7 @@ class QPTDataProcessor:
                                      ub=self.ub,
                                      )
             self.popt_bootstrap.append(popt)
+            self.psd_bootstrap.append(psd)
         self.popt_bootstrap = np.array(self.popt_bootstrap)
 
     def print_stats(self):

@@ -29,4 +29,6 @@ __all__ = ['do_measurement',
            'load_processed_data',
            'QPTDataProcessor',
            'get_pulse_period',
+           'get_ge_freq',
+           'get_ro_freq',
            ]

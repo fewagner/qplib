@@ -221,7 +221,10 @@ def plot_psd_lonly(f, Pxx_den, psd_popt, ylim=None, use_ax=None, show=True,
         return ax
 
 
-def plot_spectrogram(jumps, nperseg=5000, xlim=None, use_ax=None, show=True, weight_by_freq=False, vals=None, **kwargs):
+def plot_spectrogram(jumps, nperseg=5000, xlim=None, use_ax=None, show=True,
+                     weight_by_freq=False, vals=None,
+                     log=False,
+                     **kwargs):
     if use_ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(6, 4), dpi=300)
     else:
@@ -235,14 +238,22 @@ def plot_spectrogram(jumps, nperseg=5000, xlim=None, use_ax=None, show=True, wei
 
     if vals is None:
         vals = (1e-4, 2e-1)
-        
-    ax.pcolormesh(t, f, sxx * wei.reshape(-1, 1), rasterized=True,
-                   vmin=vals[0], vmax=vals[1])
 
-    for fq in kwargs["freqs"]:
-        ax.axhline(fq, color='white', linestyle='dotted', linewidth=1)
-        pos = xlim[0] if xlim is not None else 0
-        ax.text(pos, fq, "{:.1e}".format(fq), color="white")
+    if log:
+        sxx = np.log10(sxx)
+        vmin = np.log10(vals[0])
+        vmax = np.log10(vals[1])
+    else:
+        vmin = vals[0]
+        vmax = vals[1]
+    ax.pcolormesh(t, f, sxx * wei.reshape(-1, 1), rasterized=True,
+                   vmin=vmin, vmax=vmax)
+
+    if "freqs" in kwargs:
+        for fq in kwargs["freqs"]:
+            ax.axhline(fq, color='white', linestyle='dotted', linewidth=1)
+            pos = xlim[0] if xlim is not None else 0
+            ax.text(pos, fq, "{:.1e}".format(fq), color="white")
 
     ax.set_ylabel('Frequency (Hz)')
     ax.set_xlabel('Time (s)')
