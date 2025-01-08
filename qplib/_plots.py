@@ -176,7 +176,11 @@ def plot_psd(f, Pxx_den, psd_popt, ylim=None, use_ax=None, show=True, weight_by_
 
 
 def plot_psd_lonly(f, Pxx_den, psd_popt, ylim=None, use_ax=None, show=True,
-             **kwargs):
+                   lloc=None, **kwargs):
+
+    if lloc is None:
+        lloc = 'lower left'
+
     if use_ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(6, 4), dpi=300)
     else:
@@ -211,7 +215,7 @@ def plot_psd_lonly(f, Pxx_den, psd_popt, ylim=None, use_ax=None, show=True,
 
     plt.title("Time base: {:.2f} $\mu$s".format(kwargs["time_base"] * 1e6))
 
-    plt.legend(loc='lower left', framealpha=1.0).set_zorder(1000)
+    plt.legend(loc=lloc, framealpha=1.0).set_zorder(1000)
     plt.tight_layout()
 
     if show:
