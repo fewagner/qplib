@@ -167,7 +167,8 @@ class QPTDataProcessor:
                 ub=[1., 1., 1., 1e7, 1e7, 1e7],
                 ):
         assert self.f is not None and self.psd is not None, "should calc_psd first!"
-        assert methode in ['mse', 'ml'], "methode not supported, use ml or mse"
+        assert methode in ['mse', 'ml', 'mse_nolog'], "methode not supported, use ml " \
+                                             "or mse or mse_nolog"
 
         if filter_window is not None:
             self.filtered_psd = savgol_filter(self.psd, filter_window,
@@ -188,6 +189,17 @@ class QPTDataProcessor:
                                     co_2=f)),
                 self.f[1:],
                 np.log10(self.psd[1:]),
+                p0=p0,
+                bounds=(lb, ub),
+            )
+            self.popt = self.res[0]
+
+        elif methode == 'mse_nolog':
+            self.res = curve_fit(
+                lambda x, a, b, c, d, e, f: psd_ffunc_lonly(freq=x, A=a, B=b, C=c, co_0=d, co_1=e,
+                                    co_2=f),
+                self.f[1:],
+                self.psd[1:],
                 p0=p0,
                 bounds=(lb, ub),
             )
@@ -217,14 +229,15 @@ class QPTDataProcessor:
         self.loss = np.sum((np.log10(psd_ffunc_lonly(self.f[1:], *self.popt)) -
                             np.log10(self.psd[1:])) ** 2)
 
-    def plot_psd(self, filtered=True, ylim=None, show=True):
+    def plot_psd(self, filtered=True, ylim=None, show=True, lloc=None):
         assert self.f is not None and self.psd is not None, "should calc_psd first!"
         assert self.popt is not None, "should fit_psd first!"
 
         out = plot_psd_lonly(self.f,
                              self.filtered_psd if filtered else self.psd,
                              self.popt, show=show, ylim=ylim,
-                             time_base=self.time_base, freqs=self.popt[3:])
+                             time_base=self.time_base, freqs=self.popt[3:],
+                             lloc=lloc)
         return out
 
     def print_results(self):
