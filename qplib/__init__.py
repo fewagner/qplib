@@ -31,4 +31,5 @@ __all__ = ['do_measurement',
            'get_pulse_period',
            'get_ge_freq',
            'get_ro_freq',
+           'fit_tunneling',
            ]
